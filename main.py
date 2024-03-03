@@ -69,7 +69,7 @@ def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, w
                                    hidden_channels=hidden_channels, num_layers=n_layers,
                                    out_channels=dataset.num_classes, dropout=dropout, bias=bias)
 
-        elif model_name == 'GNAM':
+        elif model_name == 'gnam':
             model = GNAM(in_channels=dataset.num_features,
                                    hidden_channels=hidden_channels, num_layers=n_layers,
                                    out_channels=dataset.num_classes, dropout=dropout, bias=bias)
@@ -110,8 +110,8 @@ def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, w
         if wandb_flag:
             for name, val in config.items():
                 print(f'{name}: {val}')
-            exp_name = f'Contractive_{model.__class__.__name__}_{data_name}'
-            wandb.init(project='Contractive GNN', reinit=True, entity='gnnsimplbias',
+            exp_name = f'GNAM_{model.__class__.__name__}_{data_name}'
+            wandb.init(project='GNAM', reinit=True, entity='gnnsimplbias',
                        settings=wandb.Settings(start_method='thread'),
                        config=config, name=exp_name)
 
@@ -172,8 +172,8 @@ if __name__ == '__main__':
     parser.add_argument('--wd', dest='wd', type=float, default=0.00005)
     parser.add_argument('--data_name', dest='data_name', type=str, default='cora',
                         choices=['cora', 'citeseer', 'pubmed'])
-    parser.add_argument('--model_name', dest='model_name', type=str, default='GNAM',
-                        choices=['gcn', 'gin', 'gatv2', 'graphconv', 'GNAM'])
+    parser.add_argument('--model_name', dest='model_name', type=str, default='gnam',
+                        choices=['gcn', 'gin', 'gatv2', 'graphconv', 'gnam'])
     parser.add_argument('--seed', dest='seed', type=int, default=-1, choices=[-1, 10])
     parser.add_argument('--run_grid_search', dest='run_grid_search', type=int, default=0)
 
