@@ -1,4 +1,5 @@
-﻿from torch_geometric.nn import GraphConv, GCNConv, GINConv, GATv2Conv
+﻿import torch
+from torch_geometric.nn import GraphConv, GCNConv, GINConv, GATv2Conv
 from torch_geometric.nn import global_mean_pool
 import torch.nn as nn
 import torch_geometric as pyg
@@ -231,33 +232,35 @@ class GNAM(nn.Module):
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
 
+        fx = stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
+        f_sums = fx.sum(dim=1)
+        # Ron: compute this every forward pass?
+        adj = to_scipy_sparse_matrix(edge_index)
+        node_distances = floyd_warshall(adj)
+        m_dist = self.m(node_distances)
+        m_dist = torch.from_numpy(m_dist)
+        out = torch.matmul(m_dist, f_sums)
+
         # apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
         # initialize here some empty matrix of size x to store the stacked f(x). this matrix will be the same as x but with transformed values using fs.
         # for feature_index in range(x.size(1):
         # TODO: apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
         # initialize here some empty matrix of size x to store the stacked f(x). this matrix will be the same as x but with transformed values using fs.
 
-        fx = stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
 
         # for feature_index in range(x.size(1)):
         #     self.fs[feature_index](x[-1, feature_index])
 
         # TODO: sum the transformed features for each node
 
-        f_sums = fx.sum(dim=1)
 
         # TODO: compute node distances matrix between all nodes (this is a matrix)
 
-        # Ron: compute this every forward pass?
-        adj = to_scipy_sparse_matrix(edge_index)
-        node_distances = floyd_warshall(adj)
 
         # TODO: apply self.m to the distanced for value in this matrix, this can be done efficiently
-        m_dist = self.m(node_distances)
 
         # TODO:weight sum the above sum using the transformed distances for eahc node
 
         # TODO: the output should be a scalar for each node
-        out = m_dist.dot(f_sums)
 
         return out
