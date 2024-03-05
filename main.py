@@ -125,7 +125,7 @@ def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, w
                                                                    classify=True, device=device)
             val_loss, va_acc, val_auc = trainer.test_epoch(model, dloader=val_loader,
                                                            loss_fn=loss, classify=True,
-                                                           device=device)
+                                                           device=device, val_mask=True)
 
             print(f'Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, '
                   f'Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, '
