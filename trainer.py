@@ -72,7 +72,7 @@ def train_epoch(model, dloader, loss_fn, optimizer, device, classify=True, label
         return running_loss / len(dloader), -1
 
 
-def test_epoch(model, dloader, loss_fn, device, classify=True, label_index=0, compute_auc=False):
+def test_epoch(model, dloader, loss_fn, device, classify=True, label_index=0, compute_auc=False, val_mask=False):
     with torch.no_grad():
         running_loss = 0.0
         all_probas = np.array([])
@@ -83,7 +83,7 @@ def test_epoch(model, dloader, loss_fn, device, classify=True, label_index=0, co
         model.eval()
         for i, data in enumerate(dloader):
             if len(data.y.shape) > 1:
-                labels = data.y[:, label_index].view(-1,1).flatten()
+                labels = data.y[:, label_index].view(-1, 1).flatten()
                 labels = labels.float()
             else:
                 labels = data.y.flatten()
@@ -100,8 +100,12 @@ def test_epoch(model, dloader, loss_fn, device, classify=True, label_index=0, co
             if isinstance(outputs, tuple):
                 outputs = outputs[0]
             if 'test_mask' in data.keys:
-                outputs = outputs[data.test_mask]
-                labels = labels[data.test_mask]
+                if val_mask:
+                    outputs = outputs[data.val_mask]
+                    labels = labels[data.val_mask]
+                else:
+                    outputs = outputs[data.test_mask]
+                    labels = labels[data.test_mask]
             n_samples += len(labels)
             loss = loss_fn(outputs, labels)
             running_loss += loss.item()
