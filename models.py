@@ -7,7 +7,6 @@ import torch.nn.functional as F
 
 from torch_geometric.utils import to_scipy_sparse_matrix
 from scipy.sparse.csgraph import floyd_warshall
-from torch import stack
 
 class GATv2Model(nn.Module):
     def __init__(self, in_channels, out_channels, num_layers, hidden_channels=None,
@@ -232,7 +231,7 @@ class GNAM(nn.Module):
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
 
-        fx = stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
+        fx = torch.stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
         f_sums = fx.sum(dim=1)
         # Ron: compute this every forward pass?
         adj = to_scipy_sparse_matrix(edge_index)
