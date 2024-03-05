@@ -224,9 +224,9 @@ class GNAM(nn.Module):
         self.dropout = dropout
         self.lns = []
         self.fs = nn.ModuleList([
-            nn.Linear(in_channels, 1, bias=bias) for i in range(in_channels)]) #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
+            nn.Linear(1, 1, bias=bias) for i in range(in_channels)]) #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
         self.m = self.f = nn.Sequential(
-            nn.Linear(in_channels, 1, bias=bias))
+            nn.Linear(1, 1, bias=bias))
 
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
