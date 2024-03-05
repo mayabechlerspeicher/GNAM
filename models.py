@@ -223,17 +223,17 @@ class GNAM(nn.Module):
         self.bias = bias
         self.dropout = dropout
         self.lns = []
-        self.fs = nn.ModuleList[nn.Sequential(
-            nn.Linear(in_channels, hidden_channels, bias=bias) for i in range(in_channels))] #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
+        self.fs = nn.ModuleList([
+            nn.Linear(in_channels, 1, bias=bias) for i in range(in_channels)]) #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
         self.m = self.f = nn.Sequential(
-            nn.Linear(in_channels, hidden_channels, bias=bias))
+            nn.Linear(in_channels, 1, bias=bias))
 
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
 
         fx = torch.stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
         f_sums = fx.sum(dim=1)
-        # Ron: compute this every forward pass?
+        # Ron: compute this every forward pass? # Maya: We can actually compute it once and attach it to the pyg data object, then use is as inputs.distances or something like that
         adj = to_scipy_sparse_matrix(edge_index)
         node_distances = torch.from_numpy(floyd_warshall(adj))
         m_dist = self.m(node_distances)
