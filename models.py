@@ -235,9 +235,8 @@ class GNAM(nn.Module):
         f_sums = fx.sum(dim=1)
         # Ron: compute this every forward pass?
         adj = to_scipy_sparse_matrix(edge_index)
-        node_distances = floyd_warshall(adj)
+        node_distances = torch.from_numpy(floyd_warshall(adj))
         m_dist = self.m(node_distances)
-        m_dist = torch.from_numpy(m_dist)
         out = torch.matmul(m_dist, f_sums)
 
         # apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
