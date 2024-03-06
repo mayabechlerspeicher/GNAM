@@ -227,8 +227,7 @@ class GNAM(nn.Module):
         self.lns = []
         self.fs = nn.ModuleList(
             [nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
-             for i in range(
-                in_channels)])  #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
+             for _ in range(in_channels)])
         self.m = nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
 
     def forward(self, inputs):
@@ -238,35 +237,12 @@ class GNAM(nn.Module):
         for feature_index in range(x.size(1)):
             feature_col = fx[:, feature_index]
             fx[:, feature_index] = self.fs[feature_index](feature_col.view(-1, 1)).flatten()
-            # feature_col.apply_(lambda e: self.fs[feature_index](torch.tensor(e)))
-            # fx[feature_index] = feature_col
 
         f_sums = fx.sum(dim=1)
         adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(edge_index))
         node_distances = torch.from_numpy(floyd_warshall(adj)).float()
-        m_dist = self.m(node_distances.flatten().view(-1,1 )).view(x.size(0), x.size(0))
+        node_distances = torch.nan_to_num(node_distances, posinf=0.0) + torch.eye(node_distances.size(-1))
+        m_dist = self.m(node_distances.flatten().view(-1, 1)).view(x.size(0), x.size(0))
         out = torch.matmul(m_dist, f_sums)
-
-        # apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
-        # initialize here some empty matrix of size x to store the stacked f(x). this matrix will be the same as x but with transformed values using fs.
-        # for feature_index in range(x.size(1):
-        # TODO: apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
-        # initialize here some empty matrix of size x to store the stacked f(x). this matrix will be the same as x but with transformed values using fs.
-
-
-        # for feature_index in range(x.size(1)):
-        #     self.fs[feature_index](x[-1, feature_index])
-
-        # TODO: sum the transformed features for each node
-
-
-        # TODO: compute node distances matrix between all nodes (this is a matrix)
-
-
-        # TODO: apply self.m to the distanced for value in this matrix, this can be done efficiently
-
-        # TODO:weight sum the above sum using the transformed distances for eahc node
-
-        # TODO: the output should be a scalar for each node
 
         return out
