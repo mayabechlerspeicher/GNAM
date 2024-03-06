@@ -233,7 +233,7 @@ class GNAM(nn.Module):
 
         fx = x.clone()
         for feature_index in range(x.size(1)):
-            feature_col = x[:, feature_index]
+            feature_col = fx[:, feature_index]
             feature_col.apply_(lambda e: self.fs[feature_index](torch.tensor(e)))
             fx[feature_index] = feature_col
 
