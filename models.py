@@ -231,9 +231,13 @@ class GNAM(nn.Module):
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
 
-        fx = torch.stack([fl(x[:, l]) for (l, fl) in enumerate(self.fs)])
+        fx = x.clone()
+        for feature_index in range(x.size(1)):
+            feature_col = x[:, feature_index]
+            feature_col.apply_(lambda e: self.fs[feature_index](torch.tensor(e)))
+            fx[feature_index] = feature_col
+
         f_sums = fx.sum(dim=1)
-        # Ron: compute this every forward pass? # Maya: We can actually compute it once and attach it to the pyg data object, then use is as inputs.distances or something like that
         adj = to_scipy_sparse_matrix(edge_index)
         node_distances = torch.from_numpy(floyd_warshall(adj))
         m_dist = self.m(node_distances)
