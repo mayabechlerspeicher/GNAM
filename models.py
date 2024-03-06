@@ -7,6 +7,8 @@ import torch.nn.functional as F
 
 from torch_geometric.utils import to_scipy_sparse_matrix
 from scipy.sparse.csgraph import floyd_warshall
+import scipy
+
 
 class GATv2Model(nn.Module):
     def __init__(self, in_channels, out_channels, num_layers, hidden_channels=None,
@@ -223,10 +225,11 @@ class GNAM(nn.Module):
         self.bias = bias
         self.dropout = dropout
         self.lns = []
-        self.fs = nn.ModuleList([
-            nn.Linear(1, 1, bias=bias) for i in range(in_channels)]) #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
-        self.m = self.f = nn.Sequential(
-            nn.Linear(1, 1, bias=bias))
+        self.fs = nn.ModuleList(
+            [nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
+             for i in range(
+                in_channels)])  #a one layer network for each feature. #TODO: change each to a network of num_layers linear layer with hidden_channels hidden dimensions
+        self.m = nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
 
     def forward(self, inputs):
         x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
@@ -234,13 +237,14 @@ class GNAM(nn.Module):
         fx = x.clone()
         for feature_index in range(x.size(1)):
             feature_col = fx[:, feature_index]
-            feature_col.apply_(lambda e: self.fs[feature_index](torch.tensor(e)))
-            fx[feature_index] = feature_col
+            fx[:, feature_index] = self.fs[feature_index](feature_col.view(-1, 1)).flatten()
+            # feature_col.apply_(lambda e: self.fs[feature_index](torch.tensor(e)))
+            # fx[feature_index] = feature_col
 
         f_sums = fx.sum(dim=1)
-        adj = to_scipy_sparse_matrix(edge_index)
-        node_distances = torch.from_numpy(floyd_warshall(adj))
-        m_dist = self.m(node_distances)
+        adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(edge_index))
+        node_distances = torch.from_numpy(floyd_warshall(adj)).float()
+        m_dist = self.m(node_distances.flatten().view(-1,1 )).view(x.size(0), x.size(0))
         out = torch.matmul(m_dist, f_sums)
 
         # apply f_i for each feature i, to do this efficiently you can apply f_i for the column i of the feature matrix x.
