@@ -44,6 +44,146 @@ class EarlyStopping:
             self.counter = 0
 
 
+def node_level_one_vs_all_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, wandb_flag, wd,
+            hidden_channels, lr, bias, patience, loss_thresh, debug, data_name):
+    if debug:
+        wandb_flag=False
+    for i, seed in enumerate(seeds):
+
+        if model_name == 'gcn':
+            model = GCNModel(in_channels=dataset.num_features,
+                             hidden_channels=args.hidden_channels, num_layers=args.n_layers,
+                             out_channels=dataset.num_classes)
+        elif model_name == 'gin':
+            model = GINModel(in_channels=dataset.num_features,
+                             hidden_channels=hidden_channels, num_layers=n_layers,
+                             out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+        if model_name == 'gatv2':
+            model = GATv2Model(in_channels=dataset.num_features,
+                               hidden_channels=hidden_channels, num_layers=n_layers,
+                               out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+        if model_name == 'graphconv':
+            model = GraphConvModel(in_channels=dataset.num_features,
+                                   hidden_channels=hidden_channels, num_layers=n_layers,
+                                   out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+        elif model_name == 'gnam':
+            model = GNAM(in_channels=dataset.num_features,
+                                   hidden_channels=hidden_channels, num_layers=n_layers,
+                                   out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+        num_of_classes = np.max([2, data.y.max().item() + 1])
+        train_preds_all_classes = np.zeros(shape=(data.train_mask.sum().item(), num_of_classes))
+        val_preds_all_classes = np.zeros(shape=(data.val_mask.sum().item(), num_of_classes))
+        test_preds_all_classes = np.zeros(shape=(data.test_mask.sum().item(), num_of_classes))
+
+
+        for class_i in range(num_of_classes):
+            cloned_data = data.clone()
+            cloned_data.y = (cloned_data.y == class_i).float()
+            train_loader = pyg.loader.DataLoader([cloned_data], batch_size=1)
+            val_loader = pyg.loader.DataLoader([cloned_data], batch_size=1)
+            test_loader = pyg.loader.DataLoader([cloned_data], batch_size=1)
+
+
+            if debug:
+                device = torch.device("cpu")
+            else:
+                if torch.cuda.is_available():
+                    device = torch.device("cuda")
+                else:
+                    device = torch.device("cpu")
+
+            model.to(device)
+
+            config = {
+                'lr': lr,
+                'loss': loss_type.__name__,
+                'hidden_channels': hidden_channels,
+                'n_conv_layers': n_layers,
+                'output_dim': dataset.num_classes,
+                'num_epochs': num_epochs,
+                'optimizer': optimizer_type.__name__,
+                'model': model.__class__.__name__,
+                'device': device.type,
+                'loss_thresh': loss_thresh,
+                'debug': debug,
+                'wd': wd,
+                'bias': bias,
+                'dropout': dropout,
+                'seed': i,
+                'data_name': data_name,
+            }
+
+            if wandb_flag:
+                for name, val in config.items():
+                    print(f'{name}: {val}')
+                exp_name = f'GNAM_{model.__class__.__name__}_{data_name}'
+                wandb.init(project='GNAM', reinit=True, entity='gnnsimplbias',
+                           settings=wandb.Settings(start_method='thread'),
+                           config=config, name=exp_name)
+
+            optimizer = torch.optim.Adam(params=model.parameters(), lr=lr, weight_decay=wd)
+            loss = loss_type()
+            early_stop = EarlyStopping(metric_name='Loss', patience=patience, min_is_better=True)
+            for epoch in range(num_epochs):
+                train_loss, train_acc, train_auc = trainer.train_epoch(model, dloader=train_loader,
+                                                                       loss_fn=loss,
+                                                                       optimizer=optimizer,
+                                                                       classify=True, device=device)
+                val_loss, va_acc, val_auc = trainer.test_epoch(model, dloader=val_loader,
+                                                               loss_fn=loss, classify=True,
+                                                               device=device, val_mask=True)
+
+                print(f'Epoch: {epoch:03d}, Train Loss: {train_loss:.4f}, '
+                      f'Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, '
+                      f'Val Acc: {va_acc:.4f}')
+                early_stop(val_loss)
+                if train_loss < loss_thresh:
+                    print(f'loss under {loss_thresh} at epoch: {epoch}')
+                    break
+                if early_stop_flag and early_stop.early_stop:
+                    print(f'early stop at epoch: {epoch}')
+                    break
+                if wandb_flag:
+                    wandb.log({'train_loss': train_loss,
+                               'train_acc': train_acc,
+                               'val_loss': val_loss,
+                               'val_acc': va_acc,
+                               'epoch': epoch})
+
+            # test
+            test_loss, test_acc, test_auc = trainer.test_epoch(model, dloader=test_loader,
+                                                               loss_fn=loss, classify=True,
+                                                               device=device)
+            print(f'Test Loss: {test_loss:.4f}, '
+                  f'Test Acc: {test_acc:.4f}')
+
+            if wandb_flag:
+                wandb.log({'test_loss': test_loss,
+                           'test_acc': test_acc})
+                wandb.finish()
+
+        test_one_vs_all_preds = np.argmax(test_preds_all_classes, axis=1)
+        acc_test = (y_test == test_one_vs_all_preds).sum() / len(y_test)
+
+        valid_one_vs_all_preds = np.argmax(val_preds_all_classes, axis=1)
+        acc_valid = (y_valid == valid_one_vs_all_preds).sum() / len(y_valid)
+
+        train_one_vs_all_preds = np.argmax(train_preds_all_classes, axis=1)
+        acc_train = (y_train == train_one_vs_all_preds).sum() / len(y_train)
+
+        print('acc_test: ' + str(acc_test))
+        print('acc_valid: ' + str(acc_valid))
+        print('acc_train: ' + str(acc_train))
+
+        if wandb_flag:
+            wandb.log({'acc test': acc_test})
+            wandb.log({'acc valid': acc_valid})
+            wandb.log({'acc train': acc_train})
+            wandb.finish()
 def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, wandb_flag, wd,
             hidden_channels, lr, bias, patience, loss_thresh, debug, data_name):
     if debug:
@@ -77,6 +217,7 @@ def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, w
         train_loader = pyg.loader.DataLoader([data], batch_size=1)
         val_loader = pyg.loader.DataLoader([data], batch_size=1)
         test_loader = pyg.loader.DataLoader([data], batch_size=1)
+
 
         if debug:
             device = torch.device("cpu")
@@ -180,7 +321,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     loss_thresh = 0.00001
-    loss_type = torch.nn.CrossEntropyLoss
+    loss_type = torch.nn.BCEWithLogitsLoss
     optimizer_type = torch.optim.Adam
 
     data_path = 'data'
@@ -201,8 +342,13 @@ if __name__ == '__main__':
         for n_layers in grid_n_layers:
             for early_stop in grid_early_stop:
                 for dropout in grid_dropout:
-                    run_exp(n_layers=n_layers, early_stop_flag=early_stop, dropout=dropout,
-                            model_name=args.model_name, apply_contractive=args.apply_contractive,
+                    # run_exp(n_layers=n_layers, early_stop_flag=early_stop, dropout=dropout,
+                    #         model_name=args.model_name,
+                    #         num_epochs=args.num_epochs, wandb_flag=args.wandb_flag, wd=args.wd,
+                    #         hidden_channels=args.hidden_channels, lr=args.lr, bias=args.bias, patience=args.patience,
+                    #         debug=args.debug, loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name)
+                    node_level_one_vs_all_exp(n_layers=n_layers, early_stop_flag=early_stop, dropout=dropout,
+                            model_name=args.model_name,
                             num_epochs=args.num_epochs, wandb_flag=args.wandb_flag, wd=args.wd,
                             hidden_channels=args.hidden_channels, lr=args.lr, bias=args.bias, patience=args.patience,
                             debug=args.debug, loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name)

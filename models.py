@@ -224,7 +224,6 @@ class GNAM(nn.Module):
         self.num_layers = num_layers
         self.bias = bias
         self.dropout = dropout
-        self.lns = []
         self.fs = nn.ModuleList(
             [nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
              for _ in range(in_channels)])
@@ -236,12 +235,16 @@ class GNAM(nn.Module):
         fx = x.clone()
         for feature_index in range(x.size(1)):
             feature_col = fx[:, feature_index]
-            fx[:, feature_index] = self.fs[feature_index](feature_col.view(-1, 1)).flatten()
+            feature_col = feature_col.view(-1, 1)
+            feature_col = self.fs[feature_index](feature_col)
+            feature_col = feature_col.flatten()
+            fx[:, feature_index] = feature_col
 
         f_sums = fx.sum(dim=1)
         adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(edge_index))
         node_distances = torch.from_numpy(floyd_warshall(adj)).float()
-        node_distances = torch.nan_to_num(node_distances, posinf=0.0) + torch.eye(node_distances.size(-1))
+        node_distances = node_distances + torch.eye(node_distances.size(-1)) + 1
+        node_distances = torch.nan_to_num(node_distances, posinf=0.0)
         m_dist = self.m(node_distances.flatten().view(-1, 1)).view(x.size(0), x.size(0))
         out = torch.matmul(m_dist, f_sums)
 
