@@ -234,7 +234,7 @@ class GNAM(nn.Module):
 
         fx = x.clone()
         for feature_index in range(x.size(1)):
-            feature_col = fx[:, feature_index]
+            feature_col = fx[:, feature_index].clone()
             feature_col = feature_col.view(-1, 1)
             feature_col = self.fs[feature_index](feature_col)
             feature_col = feature_col.flatten()
