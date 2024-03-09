@@ -217,7 +217,7 @@ class GINModel(nn.Module):
 
 class GNAM(nn.Module):
     def __init__(self, in_channels, out_channels, num_layers, hidden_channels=None, bias=True, dropout=0.0):
-        super(GNAM, self).__init__()
+        super().__init__()
 
         self.out_channels = out_channels
         self.hidden_channels = hidden_channels
@@ -230,22 +230,23 @@ class GNAM(nn.Module):
         self.m = nn.Sequential(nn.Linear(1, hidden_channels, bias=bias), nn.Linear(hidden_channels, 1, bias=bias))
 
     def forward(self, inputs):
-        x, edge_index, batch = inputs.x, inputs.edge_index, inputs.batch
+        x, edge_index, node_distances = inputs.x, inputs.edge_index, inputs.node_distances
 
-        fx = x.clone()
+        fx = torch.empty_like(x)
         for feature_index in range(x.size(1)):
-            feature_col = fx[:, feature_index].clone()
+            feature_col = x[:, feature_index].clone()
             feature_col = feature_col.view(-1, 1)
             feature_col = self.fs[feature_index](feature_col)
             feature_col = feature_col.flatten()
             fx[:, feature_index] = feature_col
 
         f_sums = fx.sum(dim=1)
-        adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(edge_index))
-        node_distances = torch.from_numpy(floyd_warshall(adj)).float()
-        node_distances = node_distances + torch.eye(node_distances.size(-1)) + 1
-        node_distances = torch.nan_to_num(node_distances, posinf=0.0)
+        # adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(edge_index))
+        # node_distances = torch.from_numpy(floyd_warshall(adj)).float()
+        # node_distances = node_distances + torch.eye(node_distances.size(-1)) + 1
+        # node_distances = torch.nan_to_num(node_distances, posinf=0.0)
         m_dist = self.m(node_distances.flatten().view(-1, 1)).view(x.size(0), x.size(0))
-        out = torch.matmul(m_dist, f_sums)
+        normalization = m_dist.sum(dim=1)
+        out = torch.matmul(m_dist, f_sums) / normalization
 
         return out

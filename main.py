@@ -7,6 +7,11 @@ import trainer
 import scipy
 import datasets
 import torch_geometric as pyg
+from torch_geometric.utils import to_scipy_sparse_matrix
+from scipy.sparse.csgraph import floyd_warshall
+import scipy
+import uuid
+import random
 
 np.random.seed(0)
 seeds = np.random.randint(low=0, high=10000, size=10)
@@ -45,42 +50,49 @@ class EarlyStopping:
 
 
 def node_level_one_vs_all_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, wandb_flag, wd,
-            hidden_channels, lr, bias, patience, loss_thresh, debug, data_name):
+            hidden_channels, lr, bias, patience, loss_thresh, debug, data_name, unique_run_id):
     if debug:
         wandb_flag=False
+        num_epochs = 1
+    num_of_classes = np.max([2, data.y.max().item() + 1])
+    adj = scipy.sparse.lil_matrix(to_scipy_sparse_matrix(data.edge_index))
+    node_distances = torch.from_numpy(floyd_warshall(adj)).float()
+    node_distances = node_distances + torch.eye(node_distances.size(-1)) + 1
+    node_distances = torch.nan_to_num(node_distances, posinf=0.0)
+    data.node_distances = node_distances
     for i, seed in enumerate(seeds):
-
-        if model_name == 'gcn':
-            model = GCNModel(in_channels=dataset.num_features,
-                             hidden_channels=args.hidden_channels, num_layers=args.n_layers,
-                             out_channels=dataset.num_classes)
-        elif model_name == 'gin':
-            model = GINModel(in_channels=dataset.num_features,
-                             hidden_channels=hidden_channels, num_layers=n_layers,
-                             out_channels=dataset.num_classes, dropout=dropout, bias=bias)
-
-        if model_name == 'gatv2':
-            model = GATv2Model(in_channels=dataset.num_features,
-                               hidden_channels=hidden_channels, num_layers=n_layers,
-                               out_channels=dataset.num_classes, dropout=dropout, bias=bias)
-
-        if model_name == 'graphconv':
-            model = GraphConvModel(in_channels=dataset.num_features,
-                                   hidden_channels=hidden_channels, num_layers=n_layers,
-                                   out_channels=dataset.num_classes, dropout=dropout, bias=bias)
-
-        elif model_name == 'gnam':
-            model = GNAM(in_channels=dataset.num_features,
-                                   hidden_channels=hidden_channels, num_layers=n_layers,
-                                   out_channels=dataset.num_classes, dropout=dropout, bias=bias)
-
-        num_of_classes = np.max([2, data.y.max().item() + 1])
-        train_preds_all_classes = np.zeros(shape=(data.train_mask.sum().item(), num_of_classes))
-        val_preds_all_classes = np.zeros(shape=(data.val_mask.sum().item(), num_of_classes))
-        test_preds_all_classes = np.zeros(shape=(data.test_mask.sum().item(), num_of_classes))
-
-
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        random.seed(seed)
+        test_one_vs_all_probas = torch.empty(num_of_classes, data.x.size(0))
         for class_i in range(num_of_classes):
+            print('class ', class_i)
+            if model_name == 'gcn':
+                model = GCNModel(in_channels=dataset.num_features,
+                                 hidden_channels=args.hidden_channels, num_layers=args.n_layers,
+                                 out_channels=dataset.num_classes)
+            elif model_name == 'gin':
+                model = GINModel(in_channels=dataset.num_features,
+                                 hidden_channels=hidden_channels, num_layers=n_layers,
+                                 out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+            if model_name == 'gatv2':
+                model = GATv2Model(in_channels=dataset.num_features,
+                                   hidden_channels=hidden_channels, num_layers=n_layers,
+                                   out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+            if model_name == 'graphconv':
+                model = GraphConvModel(in_channels=dataset.num_features,
+                                       hidden_channels=hidden_channels, num_layers=n_layers,
+                                       out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+            elif model_name == 'gnam':
+                model = GNAM(in_channels=dataset.num_features,
+                                       hidden_channels=hidden_channels, num_layers=n_layers,
+                                       out_channels=dataset.num_classes, dropout=dropout, bias=bias)
+
+
+
             cloned_data = data.clone()
             cloned_data.y = (cloned_data.y == class_i).float()
             train_loader = pyg.loader.DataLoader([cloned_data], batch_size=1)
@@ -88,13 +100,10 @@ def node_level_one_vs_all_exp(seeds, n_layers, early_stop_flag, dropout, model_n
             test_loader = pyg.loader.DataLoader([cloned_data], batch_size=1)
 
 
-            if debug:
-                device = torch.device("cpu")
+            if torch.cuda.is_available():
+                device = torch.device("cuda")
             else:
-                if torch.cuda.is_available():
-                    device = torch.device("cuda")
-                else:
-                    device = torch.device("cpu")
+                device = torch.device("cpu")
 
             model.to(device)
 
@@ -115,6 +124,8 @@ def node_level_one_vs_all_exp(seeds, n_layers, early_stop_flag, dropout, model_n
                 'dropout': dropout,
                 'seed': i,
                 'data_name': data_name,
+                'class_i': class_i,
+                'unique_run_id': str(unique_run_id),
             }
 
             if wandb_flag:
@@ -158,32 +169,30 @@ def node_level_one_vs_all_exp(seeds, n_layers, early_stop_flag, dropout, model_n
             test_loss, test_acc, test_auc = trainer.test_epoch(model, dloader=test_loader,
                                                                loss_fn=loss, classify=True,
                                                                device=device)
+
+            test_one_vs_all_probas[class_i] = torch.sigmoid(model(cloned_data.to(device)))
             print(f'Test Loss: {test_loss:.4f}, '
                   f'Test Acc: {test_acc:.4f}')
+
 
             if wandb_flag:
                 wandb.log({'test_loss': test_loss,
                            'test_acc': test_acc})
                 wandb.finish()
 
-        test_one_vs_all_preds = np.argmax(test_preds_all_classes, axis=1)
-        acc_test = (y_test == test_one_vs_all_preds).sum() / len(y_test)
+        test_one_vs_all_preds = torch.argmax(test_one_vs_all_probas, dim=0)
+        acc_test = ((data.y[data.test_mask] == test_one_vs_all_preds[data.test_mask]).sum() / data.test_mask.sum()).item()
 
-        valid_one_vs_all_preds = np.argmax(val_preds_all_classes, axis=1)
-        acc_valid = (y_valid == valid_one_vs_all_preds).sum() / len(y_valid)
+        print('one vs all acc_test: ' + str(acc_test))
 
-        train_one_vs_all_preds = np.argmax(train_preds_all_classes, axis=1)
-        acc_train = (y_train == train_one_vs_all_preds).sum() / len(y_train)
-
-        print('acc_test: ' + str(acc_test))
-        print('acc_valid: ' + str(acc_valid))
-        print('acc_train: ' + str(acc_train))
 
         if wandb_flag:
-            wandb.log({'acc test': acc_test})
-            wandb.log({'acc valid': acc_valid})
-            wandb.log({'acc train': acc_train})
+            wandb.init(project='GNAM', reinit=True, entity='gnnsimplbias',
+                           settings=wandb.Settings(start_method='thread'),
+                           config=config, name=exp_name)
+            wandb.log({'one vs all acc test': acc_test})
             wandb.finish()
+
 def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, wandb_flag, wd,
             hidden_channels, lr, bias, patience, loss_thresh, debug, data_name):
     if debug:
@@ -219,13 +228,10 @@ def run_exp(seeds, n_layers, early_stop_flag, dropout, model_name, num_epochs, w
         test_loader = pyg.loader.DataLoader([data], batch_size=1)
 
 
-        if debug:
-            device = torch.device("cpu")
+        if torch.cuda.is_available():
+            device = torch.device("cuda")
         else:
-            if torch.cuda.is_available():
-                device = torch.device("cuda")
-            else:
-                device = torch.device("cpu")
+            device = torch.device("cpu")
 
         model.to(device)
 
@@ -334,6 +340,7 @@ if __name__ == '__main__':
     elif args.data_name == 'pubmed':
         dataset = datasets.Pubmed(path=data_path)
 
+    unique_run_id = uuid.uuid1()
     data = dataset[0]
     if args.seed == -1:
         seeds = seeds[:1]
@@ -351,11 +358,11 @@ if __name__ == '__main__':
                             model_name=args.model_name,
                             num_epochs=args.num_epochs, wandb_flag=args.wandb_flag, wd=args.wd,
                             hidden_channels=args.hidden_channels, lr=args.lr, bias=args.bias, patience=args.patience,
-                            debug=args.debug, loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name)
+                            debug=args.debug, loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name,  unique_run_id=unique_run_id)
 
     else:
-        run_exp(n_layers=args.n_layers, early_stop_flag=args.early_stop, dropout=args.dropout, model_name=args.model_name,
+        node_level_one_vs_all_exp(n_layers=args.n_layers, early_stop_flag=args.early_stop, dropout=args.dropout, model_name=args.model_name,
                 num_epochs=args.num_epochs, wandb_flag=args.wandb_flag, wd=args.wd,
-                hidden_channels=args.hidden_channels, lr=args.lr, bias=args.bias, patience=args.patience, debug=args.debug,loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name)
+                hidden_channels=args.hidden_channels, lr=args.lr, bias=args.bias, patience=args.patience, debug=args.debug,loss_thresh=loss_thresh, seeds=seeds, data_name=args.data_name,  unique_run_id=unique_run_id)
 
 

@@ -7,10 +7,9 @@ def get_accuracy(outputs, labels):
     if outputs.dim() == 2 and outputs.shape[-1] > 1:
         return get_multiclass_accuracy(outputs, labels)
     else:
-        preds = torch.sign(outputs).view(-1)
-        correct = (preds == labels).sum()
-        acc = correct
-    return acc.item()
+        y_prob = torch.sigmoid(outputs).view(-1)
+        y_prob = y_prob > 0.5
+        return (labels == y_prob).sum().item()
 
 def get_multiclass_accuracy(outputs, labels):
     probas = torch.softmax(outputs, dim=-1)
